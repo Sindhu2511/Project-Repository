@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="toolbar">
+  <p class="count">{{ teams|length }} team(s)</p>
+  <a class="button" href="/new-team">+ New team</a>
+</div>
+<div class="card">
+  <table>
+    <tr><th>ID</th><th>Title</th><th>Guide</th><th>Members</th><th>Status</th></tr>
+    {% for team in teams %}
+    <tr>
+      <td>{{ team.id }}</td>
+      <td><a href="/team/{{ team.id }}">{{ team.title }}</a></td>
+      <td>{{ team.guide }}</td>
+      <td>{{ team.members }}</td>
+      <td><span class="badge {{ team.status }}">{{ team.status }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5">No teams yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

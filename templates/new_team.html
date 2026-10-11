@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}New team{% endblock %}
+{% block content %}
+<a class="back" href="/">← All teams</a>
+<div class="title-row"><h2>New team</h2></div>
+
+<form class="card form" method="post" action="/new-team">
+  <label>Project title
+    <input name="title" required maxlength="150">
+  </label>
+  <label>Guide
+    <input name="guide" required maxlength="100">
+  </label>
+  <label>Members <small>(comma-separated)</small>
+    <input name="members" required>
+  </label>
+  <label>Abstract <small>(3–5 lines on what the project does)</small>
+    <textarea name="abstract" required rows="5"></textarea>
+  </label>
+  <button type="submit">Create team</button>
+</form>
+{% endblock %}

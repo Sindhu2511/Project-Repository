@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ team.title }}{% endblock %}
+{% block content %}
+<a class="back" href="/">← All teams</a>
+
+<div class="title-row">
+  <h2>{{ team.title }}</h2>
+  <span class="badge {{ team.status }}">{{ team.status }}</span>
+</div>
+
+<div class="card details">
+  <dl>
+    <dt>Guide</dt><dd>{{ team.guide }}</dd>
+    <dt>Members</dt>
+    <dd>{% for m in team.members.split(",") %}<span class="chip">{{ m.strip() }}</span>{% endfor %}</dd>
+    <dt>Abstract</dt><dd>{{ team.abstract }}</dd>
+    <dt>Review status</dt>
+    <dd>
+      <form class="status-form" method="post" action="/team/{{ team.id }}/status">
+        <select name="status">
+          {% for s in statuses %}
+          <option value="{{ s }}" {% if s == team.status %}selected{% endif %}>{{ s }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">Update</button>
+      </form>
+    </dd>
+  </dl>
+</div>
+
+<div class="toolbar files-toolbar">
+  <h3>Project files</h3>
+</div>
+
+<details class="upload-toggle">
+  <summary class="button">+ Upload a file</summary>
+  <form class="card form upload" method="post"
+        action="/team/{{ team.id }}/upload" enctype="multipart/form-data">
+    <label>File type
+      <select name="file_type" required>
+        <option value="Doc">Document</option>
+        <option value="PPT">Presentation</option>
+        <option value="Code">Code (.zip)</option>
+      </select>
+    </label>
+    <label>File
+      <input type="file" name="file" required>
+    </label>
+    <button type="submit">Upload</button>
+  </form>
+</details>
+
+{% for type, label in [("Doc", "Documents"), ("PPT", "Presentations"), ("Code", "Code")] %}
+  {% set group = files | selectattr("file_type", "equalto", type) | list %}
+  <h4>{{ label }} <span class="count">({{ group|length }})</span></h4>
+  <div class="card">
+    {% for f in group %}
+    <div class="file-row">
+      <span class="file-name" title="{{ f.filename }}">{{ f.filename }}</span>
+      <span class="meta">{{ f.uploaded_at | ist }}</span>
+      <div class="file-actions">
+        {% if f.filename.lower().endswith((".pdf", ".png", ".jpg", ".jpeg", ".txt")) %}
+        <a href="/files/{{ f.id }}/download?inline=true" target="_blank" rel="noopener">Open</a>
+        {% endif %}
+        <a href="/files/{{ f.id }}/download">Download</a>
+        <button type="button" class="link-danger"
+                data-delete-url="/files/{{ f.id }}/delete"
+                data-filename="{{ f.filename }}">Delete</button>
+      </div>
+    </div>
+    {% else %}
+    <div class="file-row empty">No {{ label|lower }} yet.</div>
+    {% endfor %}
+  </div>
+{% endfor %}
+
+<dialog id="delete-dialog" class="modal">
+  <form method="post" id="delete-form">
+    <h3>Delete file?</h3>
+    <p><strong id="delete-filename"></strong> will be permanently deleted.
+       This action cannot be undone.</p>
+    <div class="modal-actions">
+      <button type="button" class="btn-secondary" id="delete-cancel">Cancel</button>
+      <button type="submit" class="btn-danger">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  const dialog = document.getElementById("delete-dialog");
+  const form = document.getElementById("delete-form");
+  const nameEl = document.getElementById("delete-filename");
+
+  document.querySelectorAll("[data-delete-url]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      form.action = btn.dataset.deleteUrl;
+      nameEl.textContent = btn.dataset.filename;
+      dialog.showModal();
+    });
+  });
+
+  document.getElementById("delete-cancel").addEventListener("click", () => dialog.close());
+  dialog.addEventListener("click", (e) => { if (e.target === dialog) dialog.close(); });
+</script>
+{% endblock %}

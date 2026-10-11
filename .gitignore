@@ -1,0 +1,4 @@
+venv/
+uploads/
+repo.db
+__pycache__/
