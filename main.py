@@ -1,18 +1,32 @@
-import shutil
+import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated, Literal, get_args
+from urllib.parse import quote
 
+import boto3
+from botocore.client import Config
+from botocore.exceptions import ClientError
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, SQLModel, col, select
 
 from database import ProjectFile, Team, create_tables, get_session
 
+load_dotenv()
+AWS_REGION = os.environ["AWS_REGION"]
+S3_BUCKET = os.environ["S3_BUCKET"]
+s3 = boto3.client(
+    "s3",
+    region_name=AWS_REGION,
+    endpoint_url=f"https://s3.{AWS_REGION}.amazonaws.com",
+    config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}),
+)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -126,7 +140,6 @@ def update_status(team_id: int, data: StatusUpdate, session: Session = Depends(g
     session.refresh(team)
     return team
 
-UPLOAD_DIR = Path("uploads")
 FileType = Literal["Doc", "PPT", "Code"]
 
 def save_upload(team_id: int, file_type: str, file: UploadFile, session: Session) -> ProjectFile:
@@ -136,16 +149,18 @@ def save_upload(team_id: int, file_type: str, file: UploadFile, session: Session
     if not filename:
         raise HTTPException(status_code=400, detail="File has no name")
 
-    team_dir = UPLOAD_DIR / f"team_{team_id}"
-    team_dir.mkdir(parents=True, exist_ok=True)
-
     safe_name = Path(filename).name
-    stored_path = team_dir / f"{uuid.uuid4().hex}_{safe_name}"
-    with stored_path.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    key = f"team_{team_id}/{uuid.uuid4().hex}_{safe_name}"
+    try:
+        s3.upload_fileobj(
+            file.file, S3_BUCKET, key,
+            ExtraArgs={"ContentType": file.content_type or "application/octet-stream"},
+        )
+    except ClientError as e:
+        raise HTTPException(status_code=502, detail="Upload to storage failed") from e
 
     record = ProjectFile(team_id=team_id, file_type=file_type,
-                         filename=safe_name, path=str(stored_path))
+                         filename=safe_name, path=key)      # path now holds the S3 key
     session.add(record)
     session.commit()
     session.refresh(record)
@@ -161,7 +176,7 @@ def upload_file(
     return save_upload(team_id, file_type, file, session)
 
 @app.get("/teams/{team_id}/files")
-def list_files(team_id: int, session: Session = Depends(get_session)):
+def list_files(team_id: int, session: Annotated[Session, Depends(get_session)]):
     return session.exec(select(ProjectFile).where(ProjectFile.team_id == team_id)).all()
 
 @app.post("/team/{team_id}/upload")
@@ -181,11 +196,17 @@ def download_file(file_id: int,
     record = session.get(ProjectFile, file_id)
     if not record:
         raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(
-        record.path,
-        filename=record.filename,
-        content_disposition_type="inline" if inline else "attachment",
+    disposition = "inline" if inline else "attachment"
+    url = s3.generate_presigned_url(
+        "get_object",
+        Params={
+            "Bucket": S3_BUCKET,
+            "Key": record.path,
+            "ResponseContentDisposition": f"{disposition}; filename*=UTF-8''{quote(record.filename)}",
+        },
+        ExpiresIn=300,   # link works for 5 minutes
     )
+    return RedirectResponse(url)
 
 @app.post("/files/{file_id}/delete")
 def delete_file(file_id: int, session: Annotated[Session, Depends(get_session)]):
@@ -193,7 +214,10 @@ def delete_file(file_id: int, session: Annotated[Session, Depends(get_session)])
     if not record:
         raise HTTPException(status_code=404, detail="File not found")
     team_id = record.team_id
-    Path(record.path).unlink(missing_ok=True)   # remove from disk
-    session.delete(record)                      # remove from database
+    try:
+        s3.delete_object(Bucket=S3_BUCKET, Key=record.path)
+    except ClientError as e:
+        raise HTTPException(status_code=502, detail="Delete from storage failed") from e
+    session.delete(record)
     session.commit()
     return RedirectResponse(f"/team/{team_id}", status_code=303)
