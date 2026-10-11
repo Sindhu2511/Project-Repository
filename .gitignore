@@ -3,3 +3,4 @@ uploads/
 repo.db
 __pycache__/
 .env
+*.db
